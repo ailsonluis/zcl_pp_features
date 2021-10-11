@@ -1,0 +1,245 @@
+class ZCL_PP_FEATURES definition
+  public
+  final
+  create public .
+
+public section.
+
+  types:
+    begin of ty_aufm,
+        source    type aufnr,
+        aufnr     type aufnr,
+        matnr     type matnr,
+        matkx     type maktx,
+        werks     type werks_d,
+        qtysold   type j_1bnetqty,
+        wemng     type co_wemng,
+        lot       type charg_d,
+        amein     type co_aufme,
+        ekalr     type stlkz,
+        mtart     type mtart,
+        idnrk     type idnrk,
+        kmptx     type kmptx,
+        charg     type charg_d,
+        meins     type meins,
+        qty       type menge_d,
+        qty_ratio type menge_d,
+
+
+      end of ty_aufm .
+  types:
+    begin of ty_components,
+        aufnr type aufnr,
+        idnrk type idnrk,
+        kmptx type kmptx,
+        charg type charg_d,
+        enmng type enmng,
+        meins type meins,
+      end of ty_components .
+  types:
+    begin of ty_ord_activities,
+        tmp_hhm type ru_ismng,
+        und_hhm type co_ismngeh,
+        tmp_ggf type ru_ismng,
+        und_ggf type co_ismngeh,
+      end of ty_ord_activities .
+  types TT_AUFM type TY_AUFM .
+
+  data:
+    gt_aufm type table of ty_aufm .
+
+  methods LIST_BOM_ORDER_PRODUCTION
+    importing
+      !I_AUFNR type AUFNR
+      !I_QTYSOLD type MENGE_D optional .
+  methods GET_ORDER_FOR_CHARG
+    importing
+      !I_MATNR type MATNR
+      !I_CHARG type CHARG_D
+    returning
+      value(RE_AUFNR) type AUFNR .
+  methods GET_ORDER_ACTIVITIES
+    importing
+      !I_AUFNR type AUFNR
+    returning
+      value(RE_ACTIVITIES) type TY_ORD_ACTIVITIES .
+  protected section.
+    data: gs_source type aufnr.
+private section.
+
+  methods GET_MAKTX
+    importing
+      !I_MATNR type MATNR
+    returning
+      value(RE_MAKTX) type MAKTX .
+ENDCLASS.
+
+
+
+CLASS ZCL_PP_FEATURES IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_PP_FEATURES->GET_MAKTX
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_MATNR                        TYPE        MATNR
+* | [<-()] RE_MAKTX                       TYPE        MAKTX
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  method get_maktx.
+    select single maktx  into re_maktx from makt where matnr = i_matnr and spras = sy-langu.
+  endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_PP_FEATURES->GET_ORDER_ACTIVITIES
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_AUFNR                        TYPE        AUFNR
+* | [<-()] RE_ACTIVITIES                  TYPE        TY_ORD_ACTIVITIES
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  method GET_ORDER_ACTIVITIES.
+
+    Select single sum( ISM01 ) as hhm, ILE01 , sum( ISM02 ) as ggf ,ILE02
+      from afru
+      into @data(ls_activities)
+      where aufnr eq @i_aufnr
+         and STOKZ eq ''
+         and STZHL eq ''
+      GROUP BY ile01, ile02.
+
+      re_activities-tmp_hhm = ls_activities-hhm.
+      re_activities-und_hhm = ls_activities-ile01.
+      re_activities-tmp_ggf = ls_activities-ggf.
+      re_activities-und_ggf = ls_activities-ile02.
+
+
+  endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_PP_FEATURES->GET_ORDER_FOR_CHARG
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_MATNR                        TYPE        MATNR
+* | [--->] I_CHARG                        TYPE        CHARG_D
+* | [<-()] RE_AUFNR                       TYPE        AUFNR
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  method get_order_for_charg.
+    "Retornar a ordem de produção do lote/material/centro
+    select single aufnr into re_aufnr from afpo where matnr = i_matnr
+                                 and charg = i_charg.
+
+
+  endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_PP_FEATURES->LIST_BOM_ORDER_PRODUCTION
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_AUFNR                        TYPE        AUFNR
+* | [--->] I_QTYSOLD                      TYPE        MENGE_D(optional)
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  method list_bom_order_production.
+    data: lt_aufm type table of ty_aufm,
+          wa_aufm type ty_aufm.
+
+    "atribui a inicial a variavel global.
+    if gs_source is initial.
+      gs_source = i_aufnr.
+    endif.
+
+    "Selecioa os movimentos de consumo da ordem
+    select  '0' as source,
+            aufm~aufnr,
+            afpo~matnr,
+            ' ' as maktx,
+            afpo~pwerk as werks,
+            0 as qtysold,
+            max( afpo~wemng ) as wemng ,
+            afpo~charg as lot,
+            afpo~amein,
+            ' ' as ekalr,
+            mara~mtart,
+            aufm~matnr as idnrk,
+            ' ' as kmptx ,
+            aufm~charg,
+            aufm~meins,
+            sum( case when aufm~shkzg = 'H' then aufm~menge * -1
+                      when aufm~shkzg = 'S' then aufm~menge
+            end )  as qty,
+            0 as qty_ratio
+       from ( aufm as aufm inner join afpo as afpo on afpo~aufnr = aufm~aufnr
+                           inner join mara as mara on mara~matnr = aufm~matnr )
+       into table  @lt_aufm
+       where aufm~aufnr eq @i_aufnr
+
+       and aufm~bwart in ('261','262')
+       group by aufm~aufnr, afpo~matnr,afpo~pwerk, afpo~wemng, afpo~charg, afpo~amein, mara~mtart, aufm~matnr, aufm~charg, aufm~meins
+       order by mara~mtart ascending, aufm~matnr ascending .
+
+    "tratamento para calcular a qty de componente proporcional no niveis inferiores.
+
+    loop at lt_aufm assigning field-symbol(<fs_aufm_p>) .
+      <fs_aufm_p>-source = gs_source.
+      <fs_aufm_p>-qty = abs( <fs_aufm_p>-qty ).
+      "descrição do material da ordem
+      <fs_aufm_p>-matkx = me->get_maktx( i_matnr = <fs_aufm_p>-matnr ).
+      <fs_aufm_p>-kmptx = me->get_maktx( i_matnr = <fs_aufm_p>-idnrk ).
+      if i_qtysold is initial.
+        <fs_aufm_p>-qtysold = <fs_aufm_p>-wemng.
+        <fs_aufm_p>-qty_ratio = abs( <fs_aufm_p>-qty ).
+      else.
+        <fs_aufm_p>-qtysold = i_qtysold.
+        <fs_aufm_p>-qty_ratio = abs( <fs_aufm_p>-qty / <fs_aufm_p>-wemng * i_qtysold ).
+
+      endif.
+      "verifica se o componente possui estrutura
+      data(ls_checkboom) = me->get_order_for_charg( exporting i_matnr = <fs_aufm_p>-idnrk i_charg = <fs_aufm_p>-charg ).
+      if ls_checkboom is not initial.
+        <fs_aufm_p>-ekalr = abap_true.
+      endif.
+
+      try.
+          data(ls_qtdsource) = gt_aufm[ idnrk = <fs_aufm_p>-matnr charg = <fs_aufm_p>-lot ]-qty_ratio.
+          <fs_aufm_p>-qty_ratio = abs( ( <fs_aufm_p>-qty * 1000 ) / (  <fs_aufm_p>-wemng * 1000 ) )  * ls_qtdsource .
+        catch cx_sy_itab_line_not_found.
+
+      endtry.
+    endloop.
+
+    try.
+
+        wa_aufm = lt_aufm[ 1 ].
+        "busca dados de GGF da ordem
+        data(ls_activities) = me->get_order_activities( exporting  i_aufnr = wa_aufm-aufnr ).
+        "busca GGF da ordem principal
+        wa_aufm-mtart = 'ZHIB'.
+        wa_aufm-ekalr = ''.
+        wa_aufm-idnrk = 0.
+        wa_aufm-kmptx = 'DESP. ENERGIA ELETRICA - GGF'.
+        wa_aufm-charg = 0.
+        wa_aufm-meins = ls_activities-und_ggf.
+        wa_aufm-qty = ls_activities-tmp_ggf.
+        wa_aufm-qty_ratio = ( ls_activities-tmp_ggf / wa_aufm-wemng ) * wa_aufm-qtysold.
+        append wa_aufm to lt_aufm.
+        clear wa_aufm.
+      catch cx_sy_itab_line_not_found.
+    endtry.
+
+
+
+    append lines of lt_aufm to gt_aufm.
+
+    loop at lt_aufm assigning field-symbol(<fs_aufm>) .
+      "localiza ordem do material/lote
+      "se encontrar uma ordem para o material/lote faz a explosao dos componentes
+      data(ls_aufnr) = me->get_order_for_charg( exporting i_matnr = <fs_aufm>-idnrk i_charg = <fs_aufm>-charg ).
+      if ls_aufnr is not initial.
+        me->list_bom_order_production( exporting i_aufnr = ls_aufnr  i_qtysold = i_qtysold ).
+      endif.
+
+    endloop.
+
+
+
+
+  endmethod.
+ENDCLASS.
